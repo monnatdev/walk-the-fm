@@ -1,0 +1,7 @@
+{
+  "feedback_url": "",
+  "support": [
+    {"file": "support_qr_kbank.png", "label": "PromptPay"},
+    {"file": "support_qr_paypal.png", "label": "PayPal"}
+  ]
+}
