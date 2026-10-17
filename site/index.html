@@ -197,6 +197,10 @@ tr.detail > td { background: var(--soft); padding: 4px 20px 22px 72px; border-bo
   border-bottom: 1px solid var(--line); padding: 0 0 6px; }
 .shop.sh .q { font-size: inherit; }
 .owner { font-weight: 700; }
+.shops-more { justify-self: start; margin-top: 8px; font: 700 12.5px/1 var(--font-body); color: var(--cap-deep);
+  background: var(--cap-soft); border: 1px solid transparent; border-radius: 999px; padding: 7px 14px; cursor: pointer; }
+.shops-more:hover { border-color: var(--cap); }
+.shops-more:focus-visible { outline: 2px solid var(--cap); outline-offset: 2px; }
 .st-line { display: block; font-size: 12px; color: var(--ink-3); font-weight: 400; margin-top: 1px; }
 .lbl { font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-size: 10px; margin-right: 5px; color: var(--ink-2); opacity: 0.7; white-space: nowrap; }
 .st-line.missing { font-style: italic; opacity: 0.85; }
@@ -490,8 +494,17 @@ const owner = l => `<span class="owner">${esc(l.shop)}</span>` +
   (l.title ? `<span class="st-line"><span class="lbl">Shop name</span>“${esc(l.title)}”</span>` : "");
 const shopHead = (price, last) => `<div class="shop sh"><span>Character (shop owner)</span><span class="num">${price}</span><span class="q">${last}</span></div>`;
 
+// shop lists in an open row show the first few (cheapest first); a button shows the rest
+const SHOP_ROWS = 5;
+const fullLists = new Set();                       // "<item name>|buy" or "|sold": showing every shop
+const firstFew = (list, key) => fullLists.has(key) ? list : list.slice(0, SHOP_ROWS);
+const moreBtn = (list, key) => list.length <= SHOP_ROWS ? "" :
+  `<button type="button" class="shops-more" data-list="${esc(key)}">` +
+  (fullLists.has(key) ? "Show less" : `Show all ${list.length} shops`) + `</button>`;
+
 function detail(r, withPh) {
-  const shops = r.listings.length ? shopHead("Price each", "Stock") + r.listings.map((l, i) => {
+  const buyKey = r.name + "|buy", soldKey = r.name + "|sold";
+  const shops = r.listings.length ? shopHead("Price each", "Stock") + firstFew(r.listings, buyKey).map((l, i) => {
     const ph = r.phL[i];
     const why = l.price >= PH ? `${short(PH)}+` : l.price >= SOFT && !l.hov ? `${short(SOFT)}+, not hovered` : `${RATIO}× other shops`;
     return `<div class="shop${ph && !withPh ? " ph" : ""}"><span>${owner(l)}${ph ? `<span class="tag warn" title="Counted as a placeholder: ${why}">placeholder?</span>` : ""}` +
@@ -500,13 +513,14 @@ function detail(r, withPh) {
           `<span class="est-n"> · range of ${r.est.n} hovered piece${r.est.n === 1 ? "" : "s"}</span></span>`
         : r.inv === "equip" ? `<span class="st-line missing"><span class="lbl">Stats</span>not hovered in the recording</span>` : ""}</span>
       <span class="num mesos">${fmt(l.price)}</span><span class="q">${l.qty} left</span></div>`;
-  }).join("") : `<div class="none">Not listed on the latest day.</div>`;
-  const sold = r.sold.length ? `<div><h3>Sold out (${r.sold.length})</h3><div class="shops">${shopHead("Sold for", "")}${r.sold.map(l =>
-    `<div class="shop"><span>${owner(l)}</span><span class="num mesos sold">${fmt(l.price)}</span><span class="q">sold</span></div>`).join("")}</div></div>` : "";
+  }).join("") + moreBtn(r.listings, buyKey) : `<div class="none">Not listed on the latest day.</div>`;
+  const sold = r.sold.length ? `<div><h3>Sold out (${r.sold.length})</h3><div class="shops">${shopHead("Sold for", "")}${firstFew(r.sold, soldKey).map(l =>
+    `<div class="shop"><span>${owner(l)}</span><span class="num mesos sold">${fmt(l.price)}</span><span class="q">sold</span></div>`).join("")}` +
+    moreBtn(r.sold, soldKey) + `</div></div>` : "";
   const card = r.seen && r.seen.st.length
     ? `<div class="only-touch"><h3>Stats (from ${esc(r.seen.shop)}'s shop)</h3><div class="st-line">${esc(statText(r.seen.st))}</div></div>` : "";
   return `<tr class="detail"><td colspan="7"><div class="dwrap">
-    <div><h3>Where to buy · ${esc(META.latest)}</h3><div class="shops">${shops}</div></div>
+    <div><h3>Where to buy · ${esc(META.latest)}${r.listings.length ? ` (${r.listings.length})` : ""}</h3><div class="shops">${shops}</div></div>
     ${sold}${card}<div><h3>Price history</h3>${spark(r.series)}</div></div></td></tr>`;
 }
 
@@ -635,6 +649,12 @@ document.querySelectorAll("thead th[data-k]").forEach(th => {
   th.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sortBy(th); } });
 });
 function toggle(tr) { const n = tr.dataset.name; open.has(n) ? open.delete(n) : open.add(n); render(); }
+$("rows").addEventListener("click", e => {
+  const b = e.target.closest("button.shops-more"); if (!b) return;
+  const k = b.dataset.list;
+  fullLists.has(k) ? fullLists.delete(k) : fullLists.add(k);
+  render();
+});
 $("rows").addEventListener("click", e => { const tr = e.target.closest("tr.item"); if (tr) toggle(tr); });
 $("rows").addEventListener("keydown", e => {
   const tr = e.target.closest("tr.item");
