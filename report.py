@@ -191,6 +191,7 @@ def build(rows, norm):
 # card: two tabs, inventory filters, and a ranked table with a light header and orange rule.
 # Rows become cards on phones.
 PAGE = r"""<title>Walking in the Free Market</title>
+__ICONS__
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=Nunito:wght@400;600;700&display=swap">
@@ -266,9 +267,22 @@ main > * { min-width: 0; }
 .brand h1 { margin: 0; font: 600 26px/1.1 var(--font-display); letter-spacing: -0.005em; }
 .brand h1 b { color: var(--cap); font-weight: 600; }
 .brand p { margin: 4px 0 0; font-size: 13px; color: var(--ink-3); }
-.search { position: relative; flex: 1 1 300px; max-width: 420px; }
+/* search row under the filters: the box, then "Clear filters" when anything is narrowed */
+.find { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.search { position: relative; flex: 1 1 280px; max-width: 520px; }
 .search input { width: 100%; padding: 10px 40px 10px 40px; font: inherit; font-size: 14px; color: var(--ink);
-  background: var(--card); border: 1px solid var(--line); border-radius: 12px; transition: border-color .15s, box-shadow .15s; }
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px; transition: border-color .15s, box-shadow .15s; }
+.search input::-webkit-search-cancel-button { display: none; }        /* our own × instead */
+.search.has-q kbd { display: none; }
+.q-clear { position: absolute; right: 8px; top: 50%; translate: 0 -50%; width: 26px; height: 26px; border-radius: 50%;
+  border: 0; background: var(--line); color: var(--ink-2); font: 700 17px/1 var(--font-body); cursor: pointer; }
+.q-clear:hover { background: var(--cap-soft); color: var(--cap-deep); }
+.q-clear[hidden], .clear-all[hidden] { display: none; }
+.clear-all { font: 700 13px/1 var(--font-body); color: var(--cap-deep); background: none; border: 1px solid var(--line);
+  border-radius: 999px; padding: 8px 14px; cursor: pointer; }
+.clear-all:hover { border-color: var(--cap); background: var(--cap-soft); }
+.q-clear:focus-visible, .clear-all:focus-visible, button.link:focus-visible { outline: 2px solid var(--cap); outline-offset: 2px; }
+button.link { font: inherit; color: var(--cap-deep); background: none; border: 0; padding: 0; text-decoration: underline; cursor: pointer; }
 .search input::placeholder { color: var(--ink-3); }
 .search input:focus { outline: none; border-color: var(--cap); box-shadow: 0 0 0 3px var(--cap-soft); }
 .search svg { position: absolute; left: 14px; top: 50%; translate: 0 -50%; width: 16px; height: 16px;
@@ -441,18 +455,21 @@ svg.spark text { fill: var(--ink-3); font: 11px var(--font-body); }
 /* item card on hover, in the look of the game's own item tooltip (same in both themes) */
 :root { --tt-bg: rgba(28, 32, 58, 0.96); --tt-line: #5b6390; --tt-title: #8fd3ff; --tt-ink: #f2f4ff;
   --tt-dim: #a7aed6; --tt-up: #ffd45c; }
-#card { position: fixed; z-index: 10; pointer-events: none; width: 270px; padding: 12px 14px;
+.tt { width: 270px; padding: 12px 14px;
   background: var(--tt-bg); color: var(--tt-ink); border: 1px solid var(--tt-line); border-radius: 8px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); font: 12.5px/1.55 var(--font-body); }
-#card h4 { margin: 0 0 8px; text-align: center; color: var(--tt-title); font: 700 15px/1.25 var(--font-body); }
-#card h4 .plus { color: var(--tt-up); }
-#card .tt-top { display: flex; gap: 12px; align-items: center; padding-bottom: 8px; border-bottom: 1px dashed var(--tt-line); }
-#card .tt-top .slot { width: 52px; height: 52px; background: #e9e6f2; }
-#card .tt-top .slot img { max-width: 44px; max-height: 44px; }
-#card .tt-cat { font-weight: 700; letter-spacing: 0.02em; }
-#card ul { list-style: none; margin: 8px 0 0; padding: 0; text-transform: uppercase; letter-spacing: 0.02em; }
-#card li b { font-weight: 700; }
-#card .tt-note { margin: 8px 0 0; padding-top: 7px; border-top: 1px dashed var(--tt-line); color: var(--tt-dim); font-size: 11.5px; line-height: 1.45; }
+#card { position: fixed; z-index: 10; pointer-events: none; }
+.tt h4 { margin: 0 0 8px; text-align: center; color: var(--tt-title); font: 700 15px/1.25 var(--font-body); }
+.tt h4 .plus { color: var(--tt-up); }
+.tt .tt-top { display: flex; gap: 12px; align-items: center; padding-bottom: 8px; border-bottom: 1px dashed var(--tt-line); }
+.tt .tt-top .slot { width: 52px; height: 52px; background: #e9e6f2; }
+.tt .tt-top .slot img { max-width: 44px; max-height: 44px; }
+.tt .tt-cat { font-weight: 700; letter-spacing: 0.02em; }
+.tt ul { list-style: none; margin: 8px 0 0; padding: 0; text-transform: uppercase; letter-spacing: 0.02em; }
+.tt li b { font-weight: 700; }
+.tt .tt-note { margin: 8px 0 0; padding-top: 7px; border-top: 1px dashed var(--tt-line); color: var(--tt-dim); font-size: 11.5px; line-height: 1.45; }
+/* phones and tablets can't hover: the same card sits inside the opened row instead */
+.tt.inline { width: auto; max-width: 320px; box-shadow: none; }
 @media (hover: hover) { .only-touch { display: none; } }   /* mouse users get the hover card */
 
 @media (max-width: 680px) {
@@ -470,6 +487,9 @@ svg.spark text { fill: var(--ink-3); font: 11px var(--font-body); }
   .chip { flex: none; }
   .support { padding: 20px 16px; }
   .give { text-align: center; }
+  .shop { gap: 10px; }
+  .shop .q { min-width: 0; }
+  .tt.inline { max-width: none; }
   .qrs { justify-content: center; }
   thead { display: none; }
   table, tbody { display: block; min-width: 0; }
@@ -505,17 +525,21 @@ svg.spark text { fill: var(--ink-3); font: 11px var(--font-body); }
         <p>Old School Maple prices &middot; updated <span id="latest"></span> &middot; <span id="stats"></span><span id="supportLink" hidden> &middot; <a href="#support">&#9829; Support this site</a></span></p>
       </div>
     </div>
-    <label class="search">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
-      <input type="search" id="q" placeholder="Search items, shop owners or shop titles" autocomplete="off" aria-label="Search items, shop owners or shop titles">
-      <kbd>/</kbd>
-    </label>
   </header>
 
   <section class="market" aria-label="Item prices">
     <div class="head">
       <div class="tabs" id="tabs" role="tablist"></div>
       <div class="filters" id="filters"></div>
+      <div class="find">
+        <div class="search" id="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+          <input type="search" id="q" placeholder="Search items, shop owners or shop titles" autocomplete="off" aria-label="Search items, shop owners or shop titles">
+          <kbd>/</kbd>
+          <button type="button" class="q-clear" id="qClear" aria-label="Clear search" hidden>&times;</button>
+        </div>
+        <button type="button" class="clear-all" id="clearAll" hidden>Clear filters</button>
+      </div>
       <div class="sub">
         <div class="opts">
           <label class="switch"><input type="checkbox" id="todayOnly" checked><i></i>Latest day only</label>
@@ -539,7 +563,8 @@ svg.spark text { fill: var(--ink-3); font: 11px var(--font-body); }
       </table>
     </div>
     <div class="more"><button type="button" id="more" hidden></button></div>
-    <div class="empty" id="empty" hidden>No items match your search. Try a shorter word, or pick "All".</div>
+    <div class="empty" id="empty" hidden>No items match your search. Try a shorter word, or
+      <button type="button" class="link" id="emptyClear">clear the filters</button>.</div>
   </section>
   <section class="support" id="support" aria-label="Support and feedback">
     <div class="give" id="give" hidden>
@@ -564,7 +589,7 @@ svg.spark text { fill: var(--ink-3); font: 11px var(--font-body); }
   <p class="foot" id="count"></p>
 </main>
 <div id="tip" hidden></div>
-<div id="card" hidden></div>
+<div id="card" class="tt" hidden></div>
 
 <script>
 const DATA = __DATA__;
@@ -704,11 +729,10 @@ function detail(r, withPh) {
   const sold = r.sold.length ? `<div><h3>Sold out (${r.sold.length})</h3><div class="shops">${shopHead("Sold for", "")}${firstFew(r.sold, soldKey).map(l =>
     `<div class="shop"><span>${owner(l)}</span><span class="num mesos sold">${fmt(l.price)}</span><span class="q">sold</span></div>`).join("")}` +
     moreBtn(r.sold, soldKey) + `</div></div>` : "";
-  const card = r.seen && r.seen.st.length
-    ? `<div class="only-touch"><h3>Stats (from ${esc(r.seen.shop)}'s shop)</h3><div class="st-line">${esc(statText(r.seen.st))}</div></div>` : "";
-  return `<tr class="detail"><td colspan="7"><div class="dwrap">
+  const card = `<div class="only-touch"><h3>Item</h3><div class="tt inline">${cardHTML(r)}</div></div>`;
+  return `<tr class="detail"><td colspan="7"><div class="dwrap">${card}
     <div><h3>Where to buy · ${esc(META.latest)}${r.listings.length ? ` (${r.listings.length})` : ""}</h3><div class="shops">${shops}</div></div>
-    ${sold}${card}<div><h3>Price history</h3>${spark(r.series)}</div></div></td></tr>`;
+    ${sold}<div><h3>Price history</h3>${spark(r.series)}</div></div></td></tr>`;
 }
 
 function render() {
@@ -768,6 +792,10 @@ function render() {
       <td class="num c-chg">${chg}</td></tr>` + (isOpen ? detail(r, withPh) : "");
   }).join("");
   $("empty").hidden = rows.length > 0;
+  const q = $("q").value.trim() !== "";
+  $("qClear").hidden = !q;
+  $("search").classList.toggle("has-q", q);
+  $("clearAll").hidden = !(q || grp || typ || cls);
   const left = rows.length - limit;
   $("more").hidden = left <= 0;
   if (left > 0) $("more").textContent = `Show more (${fmt(left)} more)`;
@@ -809,6 +837,10 @@ $("fb").addEventListener("submit", async e => {
   } finally { btn.disabled = false; }
 });
 $("q").addEventListener("input", refilter);
+$("qClear").addEventListener("click", () => { $("q").value = ""; $("q").focus(); refilter(); });
+const clearAll = () => { $("q").value = ""; grp = typ = cls = null; refilter(); };
+$("clearAll").addEventListener("click", clearAll);
+$("emptyClear").addEventListener("click", clearAll);
 $("todayOnly").addEventListener("change", refilter);
 $("withPh").addEventListener("change", refilter);
 $("more").addEventListener("click", () => { limit += PAGE_ROWS; render(); });
@@ -913,6 +945,19 @@ def support_qr():
     return out
 
 
+def icon_links():
+    """<link> tags for the browser-tab icon (favicon.png) and the phone home-screen icon
+    (apple-touch-icon.png) beside this script, embedded so the page stays one file."""
+    import base64
+    out = []
+    for name, rel in (("favicon.png", 'icon" type="image/png'), ("apple-touch-icon.png", "apple-touch-icon")):
+        path = os.path.join(HERE, name)
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                out.append(f'<link rel="{rel}" href="data:image/png;base64,{base64.b64encode(f.read()).decode()}">')
+    return "\n".join(out)
+
+
 def site_config():
     """site.json beside this script: {"feedback_url": form endpoint for the feedback box}."""
     path = os.path.join(HERE, "site.json")
@@ -960,7 +1005,7 @@ def main():
                                         [t for *_, t in OTHER_TYPES] + ["Other"])),
             "support": support_qr(), "feedbackUrl": site_config().get("feedback_url") or None}
     js = lambda o: json.dumps(o, ensure_ascii=False).replace("</", "<\\/")
-    page = (PAGE.replace("__ARR__", ARROWS)
+    page = (PAGE.replace("__ARR__", ARROWS).replace("__ICONS__", icon_links())
                 .replace("__DATA__", js(data)).replace("__META__", js(meta)))
     if not a.fragment:
         # the <title>/<link>/<style> block goes into <head>, the rest into <body>
