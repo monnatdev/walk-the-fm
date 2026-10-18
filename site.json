@@ -1,4 +1,9 @@
 {
+  "google_form": {
+    "action": "https://docs.google.com/forms/d/e/1FAIpQLSfBL6ofl0fT6KZ9wRV3i_Z9xDqTLF0SihR8zQ-3cUGXeMVmDQ/formResponse",
+    "message": "entry.328646745",
+    "contact": "entry.1665638626"
+  },
   "feedback_url": "",
   "support": [
     {"file": "support_qr_kbank.png", "label": "PromptPay"},

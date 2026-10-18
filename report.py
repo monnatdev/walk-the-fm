@@ -795,7 +795,7 @@ function render() {
   const q = $("q").value.trim() !== "";
   $("qClear").hidden = !q;
   $("search").classList.toggle("has-q", q);
-  $("clearAll").hidden = !(q || grp || typ || cls);
+  $("clearAll").hidden = !(grp || typ || cls);
   const left = rows.length - limit;
   $("more").hidden = left <= 0;
   if (left > 0) $("more").textContent = `Show more (${fmt(left)} more)`;
@@ -820,17 +820,26 @@ function header() {
   $("stats").textContent = `${META.shops} shops · ${fmt(live)} listings`;
 }
 
-// feedback goes to a form service (Formspree-style JSON POST) set in site.json as feedback_url
+// feedback goes to a Google Form (site.json "google_form") or a Formspree-style JSON
+// endpoint (site.json "feedback_url")
 $("fb").addEventListener("submit", async e => {
   e.preventDefault();
   const status = $("fbStatus"), btn = $("fb").querySelector("button");
-  if (!META.feedbackUrl) { status.textContent = "Feedback isn't connected yet. Please try again later."; return; }
+  const gf = META.googleForm;
+  if (!gf && !META.feedbackUrl) { status.textContent = "Feedback isn't connected yet. Please try again later."; return; }
   btn.disabled = true; status.textContent = "Sending…";
   try {
-    const res = await fetch(META.feedbackUrl, { method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({ message: $("fbMsg").value, contact: $("fbWho").value, page: location.href }) });
-    if (!res.ok) throw new Error(res.status);
+    if (gf) {
+      // Google sends no CORS headers, so the reply can't be read: a network error is the
+      // only failure this can see
+      const body = new URLSearchParams({ [gf.message]: $("fbMsg").value, [gf.contact]: $("fbWho").value });
+      await fetch(gf.action, { method: "POST", mode: "no-cors", body });
+    } else {
+      const res = await fetch(META.feedbackUrl, { method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ message: $("fbMsg").value, contact: $("fbWho").value, page: location.href }) });
+      if (!res.ok) throw new Error(res.status);
+    }
     $("fb").reset(); status.textContent = "Thanks! Your feedback was sent.";
   } catch (err) {
     status.textContent = "Couldn't send right now. Please try again later.";
@@ -838,9 +847,9 @@ $("fb").addEventListener("submit", async e => {
 });
 $("q").addEventListener("input", refilter);
 $("qClear").addEventListener("click", () => { $("q").value = ""; $("q").focus(); refilter(); });
-const clearAll = () => { $("q").value = ""; grp = typ = cls = null; refilter(); };
-$("clearAll").addEventListener("click", clearAll);
-$("emptyClear").addEventListener("click", clearAll);
+// × clears the search, "Clear filters" the chips; the empty-result link clears both
+$("clearAll").addEventListener("click", () => { grp = typ = cls = null; refilter(); });
+$("emptyClear").addEventListener("click", () => { $("q").value = ""; grp = typ = cls = null; refilter(); });
 $("todayOnly").addEventListener("change", refilter);
 $("withPh").addEventListener("change", refilter);
 $("more").addEventListener("click", () => { limit += PAGE_ROWS; render(); });
@@ -959,7 +968,9 @@ def icon_links():
 
 
 def site_config():
-    """site.json beside this script: {"feedback_url": form endpoint for the feedback box}."""
+    """site.json beside this script: "google_form" {"action": .../formResponse, "message":
+    "entry.N", "contact": "entry.N"} or "feedback_url" (a Formspree-style endpoint) for the
+    feedback box; "support": the QR codes."""
     path = os.path.join(HERE, "site.json")
     if not os.path.exists(path):
         return {}
@@ -1003,7 +1014,8 @@ def main():
             "placeholderRatio": a.placeholder_ratio, "mobs": mobs,
             "types": list(dict.fromkeys([t for _, t in EQUIP_TYPES.values()] +
                                         [t for *_, t in OTHER_TYPES] + ["Other"])),
-            "support": support_qr(), "feedbackUrl": site_config().get("feedback_url") or None}
+            "support": support_qr(), "feedbackUrl": site_config().get("feedback_url") or None,
+            "googleForm": site_config().get("google_form") or None}
     js = lambda o: json.dumps(o, ensure_ascii=False).replace("</", "<\\/")
     page = (PAGE.replace("__ARR__", ARROWS).replace("__ICONS__", icon_links())
                 .replace("__DATA__", js(data)).replace("__META__", js(meta)))
