@@ -427,7 +427,7 @@ const COIN = '<svg class="coin" viewBox="0 0 16 16" aria-hidden="true"><circle c
 const dayNum = d => Date.parse(d + "T00:00:00Z") / 864e5;
 let tab = TABS[0], grp = null, typ = null, cls = null, [sortK, sortDir] = tab.sort;
 // rows drawn at once; "Show more" adds a page. Any new filter, search or sort starts over.
-const PAGE_ROWS = 100;
+const PAGE_ROWS = 50;
 let limit = PAGE_ROWS;
 const refilter = () => { limit = PAGE_ROWS; render(); };
 const open = new Set();
@@ -549,15 +549,29 @@ function detail(r, withPh) {
     ${sold}<div><h3>Price history</h3>${spark(r.series)}</div></div></td></tr>`;
 }
 
+// Work done once instead of on every keystroke:
+//  - each item's search text, lowercased;
+//  - icons as short blob: URLs instead of long data: URIs, so redrawing rows doesn't make
+//    the browser parse and decode every icon again;
+//  - price stats, per setting of the placeholder switch.
+function blobUrl(uri) {
+  const [head, b64] = uri.split(","), bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: head.slice(5, head.indexOf(";")) }));
+}
+DATA.forEach(r => {
+  r.hay = (r.name + " " + r.aka.join(" ") + " " + r.listings.map(l => l.shop + " " + l.title).join(" ")).toLowerCase();
+  if (r.icon && r.icon.startsWith("data:")) r.icon = blobUrl(r.icon);
+});
+const statsCache = {};
+const withStats = withPh => statsCache[withPh] || (statsCache[withPh] = DATA.map(r => Object.assign({}, r, stats(r, withPh))));
+
 function render() {
   const terms = $("q").value.toLowerCase().split(/\s+/).filter(Boolean);
   const todayOnly = $("todayOnly").checked, withPh = $("withPh").checked;
-  const all = DATA.map(r => Object.assign({}, r, stats(r, withPh)))
+  const all = withStats(withPh)
     .filter(r => !todayOnly || r.listings.length || r.sold.length)
-    .filter(r => {
-      const hay = (r.name + " " + r.aka.join(" ") + " " + r.listings.map(l => l.shop + " " + l.title).join(" ")).toLowerCase();
-      return terms.every(t => hay.includes(t));
-    });
+    .filter(r => terms.every(t => r.hay.includes(t)));
   $("tabs").innerHTML = TABS.map(t => `<button type="button" class="tab" role="tab" data-tab="${t.id}" aria-selected="${t === tab}">` +
     (META.mobs[t.id] ? `<img class="px" src="${META.mobs[t.id]}" alt="">` : "") + `${t.label}</button>`).join("");
   // Group -> Type -> Class; each row counts what the rows above it leave
@@ -659,7 +673,8 @@ $("fb").addEventListener("submit", async e => {
     status.textContent = "Couldn't send right now. Please try again later.";
   } finally { btn.disabled = false; }
 });
-$("q").addEventListener("input", refilter);
+let typing;                                      // search once typing pauses, not on every key
+$("q").addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(refilter, 150); });
 $("qClear").addEventListener("click", () => { $("q").value = ""; $("q").focus(); refilter(); });
 // × clears the search, "Clear filters" the chips; the empty-result link clears both
 $("clearAll").addEventListener("click", () => { grp = typ = cls = null; refilter(); });
