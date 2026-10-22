@@ -40,9 +40,10 @@ echo.
 echo [3/3] Building report ...
 python report.py
 if errorlevel 1 goto failed
-rem site\index.html: the same page, ready to drag onto app.netlify.com/drop to update the website
+rem site\index.html: the website copy (no Deals tab; that stays in the local report.html only)
 if not exist site mkdir site
-copy /y report.html site\index.html >nul
+python report.py --public --out site\index.html >nul
+if errorlevel 1 goto failed
 echo.
 echo Done. Results: "%RESULT%\items.csv"
 echo Website copy: "%~dp0site" (drag this folder onto app.netlify.com/drop to update the site)

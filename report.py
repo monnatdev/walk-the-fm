@@ -16,26 +16,28 @@ tooltips read in the recordings. The page text is English.
 """
 import argparse, collections, json, os, pathlib, re, sqlite3, sys
 from normalize import Normalizer
+from fmroom import fm_room
 from icons import item_info, mob_icon, EQUIP_TYPES, OTHER_TYPES
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ELLIPSIS = "…"
 # the mushroom family: Mushmom is the logo, one mushroom per tab
-MOBS = {"logo": 6130101, "volume": 1210102, "expensive": 2220100}
+MOBS = {"logo": 6130101, "volume": 1210102, "expensive": 2220100, "deals": 1210100}
 
 
 def load(db_path):
     if not os.path.exists(db_path):
         sys.exit(f"no database at {db_path}; run ingest.py first")
     db = sqlite3.connect(db_path)
-    # A shop seen in several clips on one day counts once, from the clip ingested last:
-    # its listings replace the earlier ones instead of being added to them.
+    # A shop seen in several clips on one day counts once, from the clip recorded last (Game
+    # Bar names end in the clock time, so the largest name is the latest): its listings
+    # replace the earlier ones instead of being added to them.
     rows = db.execute("""
         SELECT s.captured_at, l.shop_owner, l.item, l.list_name, l.price, l.qty, l.stats, l.shop_title,
-               COALESCE(l.hovered, 0)
+               COALESCE(l.hovered, 0), s.video_name
         FROM listings l JOIN snapshots s ON s.id = l.snapshot_id
-        WHERE s.id = (SELECT MAX(s2.id) FROM listings l2 JOIN snapshots s2 ON s2.id = l2.snapshot_id
-                      WHERE s2.captured_at = s.captured_at AND l2.shop_owner = l.shop_owner)""").fetchall()
+        WHERE s.video_name = (SELECT MAX(s2.video_name) FROM listings l2 JOIN snapshots s2 ON s2.id = l2.snapshot_id
+                              WHERE s2.captured_at = s.captured_at AND l2.shop_owner = l.shop_owner)""").fetchall()
     n_snap = db.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
     return rows, n_snap
 
@@ -110,17 +112,25 @@ def stat_range(reads):
     return out
 
 
+def seen_at(date, video):
+    """When a listing was seen: the day plus the recording's clock time, which Game Bar puts
+    in the clip name ("... 2569-10-22 10-07-17.mp4") -> "2026-10-22 10:07"."""
+    m = re.search(r"\d{4}-\d\d-\d\d (\d\d)-(\d\d)-\d\d", video or "")
+    return f"{date} {m[1]}:{m[2]}" if m else date
+
+
 def build(rows, norm):
     dates = sorted({r[0] for r in rows})
     latest = dates[-1] if dates else None
     items = collections.defaultdict(lambda: {"days": collections.defaultdict(list),
-                                             "today": [], "sold": [], "names": set(),
+                                             "today": [], "sold": [], "soldAll": [], "names": set(),
                                              "status": "exact"})
     unresolved = {}
     shops_today = set()
     seen = {}                                          # name -> latest tooltip read for it
     reads = collections.defaultdict(list)              # name -> stats of every hovered piece
-    for date, shop, item, list_name, price, qty, stats, title, hov in rows:
+    for date, shop, item, list_name, price, qty, stats, title, hov, video in rows:
+        at = seen_at(date, video)
         found, status, _ = norm.match_keep_upgrades(item)
         st = parse_stats(stats)
         name = found or item
@@ -139,12 +149,14 @@ def build(rows, norm):
         if line:
             reads[name].append(line)
         if not qty:                                    # sold out: what it sold for
+            # every day, for the Deals tab
+            it["soldAll"].append({"shop": shop, "fm": fm_room(title), "price": price, "hov": hov, "date": date, "at": at})
             if date == latest:
-                it["sold"].append({"shop": shop, "title": title or "", "price": price, "hov": hov})
+                it["sold"].append({"shop": shop, "title": title or "", "fm": fm_room(title), "price": price, "hov": hov})
             continue
         it["days"][date].append((price, hov))
         if date == latest:
-            listing = {"shop": shop, "title": title or "", "price": price, "qty": qty, "hov": hov}
+            listing = {"shop": shop, "title": title or "", "fm": fm_room(title), "price": price, "qty": qty, "hov": hov, "at": at}
             if line:
                 listing["st"] = line
             it["today"].append(listing)
@@ -168,6 +180,7 @@ def build(rows, norm):
             "days": [[d, sorted(v)] for d, v in sorted(it["days"].items())],
             "listings": sorted(it["today"], key=lambda l: l["price"]),
             "sold": sorted(it["sold"], key=lambda l: l["price"]),
+            "soldAll": sorted(it["soldAll"], key=lambda l: (l["price"], l["date"])),
             "seen": seen.get(name),
             "plus": plus,
             "est": est,
@@ -341,11 +354,33 @@ button.link { font: inherit; color: var(--cap-deep); background: none; border: 0
 .scroll { overflow-x: auto; }
 /* fixed column widths, so filtering or toggling never makes the columns jump */
 table { border-collapse: collapse; width: 100%; table-layout: fixed; min-width: 860px; }
-thead th:nth-child(1) { width: 56px; }
-thead th:nth-child(3), thead th:nth-child(4) { width: 150px; }
-thead th:nth-child(5) { width: 140px; }
-thead th:nth-child(6) { width: 100px; }
-thead th:nth-child(7) { width: 96px; }
+table.items thead th:nth-child(1) { width: 56px; }
+table.items thead th:nth-child(3), table.items thead th:nth-child(4) { width: 150px; }
+table.items thead th:nth-child(5) { width: 140px; }
+table.items thead th:nth-child(6) { width: 100px; }
+table.items thead th:nth-child(7) { width: 96px; }
+/* Deals tab: one row per cheap listing */
+.deals-note { margin: 0; padding: 12px 20px; font-size: 13px; color: var(--ink-2); background: var(--soft); border-bottom: 1px solid var(--line-2); }
+.deals-note b { color: var(--ink); }
+table.deals thead th { cursor: default; }
+table.deals thead th[data-dk] { cursor: pointer; }
+thead th .by { display: block; font-size: 9.5px; font-weight: 600; opacity: 0.8; }
+table.deals thead th:nth-child(2) { width: 180px; }
+table.deals { min-width: 1080px; }
+table.deals thead th:nth-child(3) { width: 108px; }
+table.deals thead th:nth-child(5), table.deals thead th:nth-child(6) { width: 118px; }
+table.deals thead th:nth-child(4) { width: 78px; }
+table.deals thead th:nth-child(7) { width: 100px; }
+table.deals thead th:nth-child(8) { width: 88px; }
+table.deals thead th:nth-child(9) { width: 140px; }
+table.deals th, table.deals td { padding-left: 10px; padding-right: 10px; }
+.when-t { display: block; font-weight: 700; }
+.stock { font-weight: 800; }
+tbody tr.deal { border-bottom: 1px solid var(--line-2); }
+tbody tr.deal:hover { background: var(--soft); }
+.off { display: inline-block; font-weight: 800; color: #fff; background: var(--up); border-radius: 6px; padding: 3px 8px; }
+.profit { display: block; font-weight: 800; color: var(--up); }
+.profit-sub { display: block; font-size: 12px; color: var(--ink-3); }
 th, td { padding: 12px 16px; text-align: left; vertical-align: middle; }
 thead th { color: var(--ink-3); font: 700 11px/1.2 var(--font-body); letter-spacing: 0.06em; text-transform: uppercase;
   white-space: nowrap; cursor: pointer; user-select: none; border-bottom: 1px solid var(--line); padding-block: 12px 10px; }
@@ -400,6 +435,12 @@ tr.detail > td { background: var(--soft); padding: 4px 20px 22px 72px; border-bo
   border-bottom: 1px solid var(--line); padding: 0 0 6px; }
 .shop.sh .q { font-size: inherit; }
 .owner { font-weight: 700; }
+.fm { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px; font-size: 11px; font-weight: 700;
+  color: var(--cap-deep); background: var(--cap-soft); vertical-align: 1px; white-space: nowrap; }
+.shop.me { background: var(--cap-soft); margin: 0 -8px; padding-left: 8px; padding-right: 8px; border-radius: 8px; }
+.shop .when { color: var(--ink-3); font-size: 12px; font-weight: 400; margin-left: 6px; }
+tbody tr.deal { cursor: pointer; }
+tbody tr.deal[aria-expanded="true"] { background: var(--soft); border-bottom-color: transparent; }
 .shops-more { justify-self: start; margin-top: 8px; font: 700 12.5px/1 var(--font-body); color: var(--cap-deep);
   background: var(--cap-soft); border: 1px solid transparent; border-radius: 999px; padding: 7px 14px; cursor: pointer; }
 .shops-more:hover { border-color: var(--cap); }
@@ -493,6 +534,25 @@ svg.spark text { fill: var(--ink-3); font: 11px var(--font-body); }
   .qrs { justify-content: center; }
   thead { display: none; }
   table, tbody { display: block; min-width: 0; }
+  .deals-note { padding: 10px 14px; }
+  table.deals { min-width: 0; }
+  tr.deal { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; padding: 14px; align-items: center; }
+  tr.deal td { display: block; padding: 0; }
+  tr.deal td.c-name, tr.deal td.c-shop { grid-column: 1 / -1; }
+  tr.deal td.num { text-align: left; }
+  tr.deal td.c-price::before { content: "Price "; color: var(--ink-3); font-weight: 400; }
+  tr.deal td.c-mkt { grid-column: 1; }
+  tr.deal td.c-mkt::before { content: "Others list at "; color: var(--ink-3); font-weight: 400; }
+  tr.deal td.c-sold { grid-column: 1; grid-row: 5; }
+  tr.deal td.c-sold::before { content: "Sold for "; color: var(--ink-3); font-weight: 400; }
+  tr.deal td.c-mkt .profit-sub, tr.deal td.c-sold .profit-sub { display: inline; margin-left: 6px; }
+  tr.deal td.c-off { grid-column: 2; grid-row: 3; text-align: right; }
+  tr.deal td.c-profit { grid-column: 2; grid-row: 4; text-align: right; }
+  tr.deal td.c-price { grid-row: 3; }
+  tr.deal td.c-mkt { grid-row: 4; }
+  tr.deal td.c-qty { grid-column: 1; grid-row: 6; }
+  tr.deal td.c-at { grid-column: 2; grid-row: 5 / span 2; text-align: right; }
+  tr.deal td.c-qty::before { content: "Stock "; color: var(--ink-3); font-weight: 400; }
   tr.item { display: grid; grid-template-columns: 28px 1fr auto; gap: 4px 10px; padding: 14px; align-items: center; }
   tr.item td { display: block; padding: 0; }
   tr.item td.rank { grid-row: 1; }
@@ -548,8 +608,25 @@ svg.spark text { fill: var(--ink-3); font: 11px var(--font-body); }
         </div>
       </div>
     </div>
-    <div class="scroll">
-      <table>
+    <div class="scroll" id="dealsWrap" hidden>
+      <p class="deals-note">Use and Etc items listed at <b>half the usual asking price or less</b>.
+        <b>Others list at</b> = the median asking price of the other shops selling it (at least 3 of them).
+        <b>Sold for</b> = the median price it actually sold out at, every recorded day. Resale profit uses the asking
+        price, so check Sold for too: asking is not selling. Click a deal to see every price. Check the price in game before you buy.</p>
+      <table class="deals">
+        <thead><tr><th>Item</th><th>Shop</th><th data-dk="price" class="num" tabindex="0">__ARR__Price</th>
+          <th data-dk="qty" class="num" tabindex="0">__ARR__Stock</th>
+          <th data-dk="market" class="num" tabindex="0" title="Median asking price of the other shops selling it now">__ARR__Others list at</th>
+          <th data-dk="sold" class="num" tabindex="0" title="Median price it sold out at, over every recorded day">__ARR__Sold for</th>
+          <th data-dk="off" class="num" tabindex="0">__ARR__Below listed</th>
+          <th data-dk="at" class="num" tabindex="0" title="When this shop was recorded">__ARR__Updated</th>
+          <th data-dk="total" class="num" tabindex="0" title="Click again to switch between profit for all the stock and profit per piece">__ARR__Resale profit<span id="profitBy" class="by">for all stock</span></th></tr></thead>
+        <tbody id="dealRows"></tbody>
+      </table>
+      <div class="empty" id="dealsEmpty" hidden>No deals right now. Try "All" or a shorter search.</div>
+    </div>
+    <div class="scroll" id="itemsWrap">
+      <table class="items">
         <thead><tr>
           <th class="rank">#</th>
           <th data-k="name" tabindex="0">__ARR__Item</th>
@@ -602,7 +679,8 @@ const CLASSES = ["Common", "Warrior", "Magician", "Bowman", "Thief", "Pirate"];
 const TABS = [
   {id: "volume", label: "High volume", sort: ["n", -1]},
   {id: "expensive", label: "Most expensive", sort: ["avg", -1]},
-];
+  {id: "deals", label: "Deals", sort: ["n", -1]},            // its own table, see findDeals()
+].filter(t => t.id !== "deals" || META.deals);              // the public site (--public) has no Deals
 const $ = id => document.getElementById(id);
 const fmt = v => v == null ? "—" : Math.round(v).toLocaleString("en-US");
 // 999,999 -> "1m" (not "1000k"): switch units where rounding would reach 1000
@@ -702,7 +780,14 @@ function cardHTML(r) {
 }
 
 // owner name, then the shop's own title (often its channel / FM room, e.g. "C1 FM2 ...")
-const owner = l => `<span class="owner">${esc(l.shop)}</span>` +
+// "2026-10-22 10:07" -> time, with the day under it
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const day = d => `${MONTHS[+d.slice(5, 7) - 1]} ${+d.slice(8, 10)}`;
+const when = at => !at ? `<span class="none">—</span>` : at.length > 10
+  ? `<span class="when-t">${esc(at.slice(11))}</span><span class="profit-sub">${day(at)}</span>` : `<span class="when-t">${day(at)}</span>`;
+// FM room: read from the shop name the owner typed ("1-14 top" = FM 14), so not every shop has one
+const fmTag = l => l.fm ? `<span class="fm" title="FM room, from the shop name">FM ${l.fm}</span>` : "";
+const owner = l => `<span class="owner">${esc(l.shop)}</span>${fmTag(l)}` +
   (l.title ? `<span class="st-line"><span class="lbl">Shop name</span>“${esc(l.title)}”</span>` : "");
 const shopHead = (price, last) => `<div class="shop sh"><span>Character (shop owner)</span><span class="num">${price}</span><span class="q">${last}</span></div>`;
 
@@ -714,16 +799,116 @@ const moreBtn = (list, key) => list.length <= SHOP_ROWS ? "" :
   `<button type="button" class="shops-more" data-list="${esc(key)}">` +
   (fullLists.has(key) ? "Show less" : `Show all ${list.length} shops`) + `</button>`;
 
+// one piece's stats: read from its tooltip, else the range of the hovered pieces (est.)
+const statLine = (r, l) => l.st ? `<span class="st-line"><span class="lbl">Stats</span>${esc(statText(l.st))}</span>`
+  : r.est ? `<span class="st-line missing" title="Not hovered in the recording. Range of the ${r.est.n} hovered piece${r.est.n === 1 ? "" : "s"} of this item, not this piece's own stats."><span class="lbl">Stats (est.)</span>${esc(statText(r.est.st))}` +
+    `<span class="est-n"> · range of ${r.est.n} hovered piece${r.est.n === 1 ? "" : "s"}</span></span>`
+  : r.inv === "equip" ? `<span class="st-line missing"><span class="lbl">Stats</span>not hovered in the recording</span>` : "";
+
+// Deals: a listing at DEAL_RATIO of the market price or less, where the market price is
+// the median asking price of the item's other listings that day (placeholders left out),
+// and only when at least DEAL_MIN_OTHERS other listings make a market to compare with.
+// Only Use and Etc items: every piece is the same, so price alone says it's a deal
+// (equipment differs by stats, so a cheap piece is usually just a weaker one).
+const DEAL_RATIO = 0.5, DEAL_MIN_OTHERS = 3, DEAL_INV = ["use", "etc"];
+// Names the shop list cut short are skipped: they can lump different items together. One
+// shop's stacks of an item at one price make one deal, their stock added up.
+function findDeals(rows) {
+  const out = new Map();
+  for (const r of rows) {
+    if (r.unsure || !DEAL_INV.includes(r.inv)) continue;
+    const live = r.listings.filter((l, i) => !r.phL[i]);
+    if (live.length < DEAL_MIN_OTHERS + 1) continue;
+    // what it actually sold for: median of the sold-out listings on every recorded day
+    const sph = phMask(r.soldAll.map(x => x.price), r.soldAll.map(x => x.hov));
+    const soldList = r.soldAll.filter((_, i) => !sph[i]);
+    const sold = soldList.length ? median(soldList.map(x => x.price)) : null, soldN = soldList.length;
+    live.forEach((l, i) => {
+      const market = median(live.filter((_, j) => j !== i).map(o => o.price));
+      if (l.price > DEAL_RATIO * market) return;
+      const key = r.name + "|" + l.shop + "|" + l.price, d = out.get(key);
+      if (d) { d.qty += l.qty; d.stacks++; d.total = d.each * d.qty; return; }
+      out.set(key, { key, r, l, live, soldList, market, others: live.length - 1, sold, soldN, off: 1 - l.price / market, each: market - l.price,
+                     qty: l.qty, stacks: 1, total: (market - l.price) * l.qty });
+    });
+  }
+  const val = d => dealK === "price" ? d.l.price : dealK === "at" ? d.l.at : d[dealK];
+  return [...out.values()].sort((a, b) => {
+    const va = val(a), vb = val(b);
+    if (va == null || vb == null) return (va == null) - (vb == null);   // no sales yet: last
+    if (va !== vb) return (va < vb ? -1 : 1) * dealDir;
+    return b.total - a.total;
+  });
+}
+// Deals sort: a header click sorts by it, largest (newest) first, then flips. Resale profit
+// instead switches between profit for all the stock and profit per piece.
+let dealK = "at", dealDir = -1;
+function sortDeals(th) {
+  const k = th.dataset.dk;
+  if (k === "total") { dealK = dealK === "total" ? "each" : "total"; dealDir = -1; }
+  else { dealDir = dealK === k ? -dealDir : -1; dealK = k; }
+  render();
+}
+document.querySelectorAll("thead th[data-dk]").forEach(th => {
+  th.addEventListener("click", () => sortDeals(th));
+  th.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sortDeals(th); } });
+});
+
+function renderDeals(rows) {
+  const deals = findDeals(rows);
+  $("dealRows").innerHTML = deals.slice(0, limit).map(d => dealRow(d) + (openDeals.has(d.key) ? dealDetail(d) : "")).join("");
+  $("dealsEmpty").hidden = deals.length > 0;
+  const left = deals.length - limit;
+  $("more").hidden = left <= 0;
+  if (left > 0) $("more").textContent = `Show more (${fmt(left)} more)`;
+  $("count").textContent = (left > 0 ? `Showing ${fmt(limit)} of ${fmt(deals.length)} deals` : `${deals.length} deal${deals.length === 1 ? "" : "s"}`) +
+    " · click a deal for every price · prices are mesos per piece";
+  document.querySelectorAll("thead th[data-dk]").forEach(th => {
+    const on = th.dataset.dk === dealK || (th.dataset.dk === "total" && dealK === "each");
+    if (on) th.setAttribute("aria-sort", dealDir > 0 ? "ascending" : "descending");
+    else th.removeAttribute("aria-sort");
+  });
+  $("profitBy").textContent = dealK === "each" ? "per piece" : "for all stock";
+}
+
+// a deal's open panel: every asking price now, and every price it sold out at
+const openDeals = new Set();
+function dealDetail({ key, r, l, live, soldList }) {
+  const listKey = key + "|list", soldKey = key + "|sold";
+  const listed = shopHead("Price each", "Stock") + firstFew(live, listKey).map(o =>
+    `<div class="shop${o.shop === l.shop && o.price === l.price ? " me" : ""}"><span>${owner(o)}</span>` +
+    `<span class="num mesos">${fmt(o.price)}</span><span class="q">${fmt(o.qty)} left</span></div>`).join("") + moreBtn(live, listKey);
+  const sold = soldList.length ? shopHead("Sold for", "Seen") + firstFew(soldList, soldKey).map(o =>
+    `<div class="shop"><span>${owner(o)}</span><span class="num mesos sold">${fmt(o.price)}</span>` +
+    `<span class="q">${day(o.at || o.date)}${(o.at || "").length > 10 ? " " + esc(o.at.slice(11)) : ""}</span></div>`).join("") + moreBtn(soldList, soldKey)
+    : `<div class="none">Not seen selling out in any recording yet.</div>`;
+  return `<tr class="detail"><td colspan="9"><div class="dwrap">
+    <div><h3>Listed now · ${esc(META.latest)} (${live.length})</h3><div class="shops">${listed}</div></div>
+    <div><h3>Sold out · every day (${soldList.length})</h3><div class="shops">${sold}</div></div></div></td></tr>`;
+}
+
+function dealRow({ key, r, l, market, others, sold, soldN, off, each, total, qty, stacks }) {
+  return `<tr class="deal" tabindex="0" data-name="${esc(r.name)}" data-key="${esc(key)}" aria-expanded="${openDeals.has(key)}">
+      <td class="c-name name"><div class="who">${slot(r)}<div>${esc(r.name)}</div></div></td>
+      <td class="c-shop">${owner(l)}</td>
+      <td class="num c-price">${money(l.price)}</td>
+      <td class="num c-qty"><span class="stock">${fmt(qty)}</span>${stacks > 1 ? `<span class="profit-sub">in ${stacks} stacks</span>` : ""}</td>
+      <td class="num c-mkt">${money(market)}<span class="profit-sub">${others} listings</span></td>
+      <td class="num c-sold">${sold == null ? `<span class="none">—</span><span class="profit-sub">no sales yet</span>`
+        : `${money(sold, "sold")}<span class="profit-sub">${soldN} sale${soldN === 1 ? "" : "s"}</span>`}</td>
+      <td class="num c-off"><span class="off">−${Math.round(off * 100)}%</span></td>
+      <td class="num c-at">${when(l.at)}</td>
+      <td class="num c-profit"><span class="profit">+${short(each)} each</span>` +
+        (qty > 1 ? `<span class="profit-sub">+${short(total)} for all ${fmt(qty)}</span>` : "") + `</td></tr>`;
+}
+
 function detail(r, withPh) {
   const buyKey = r.name + "|buy", soldKey = r.name + "|sold";
   const shops = r.listings.length ? shopHead("Price each", "Stock") + firstFew(r.listings, buyKey).map((l, i) => {
     const ph = r.phL[i];
     const why = l.price >= PH ? `${short(PH)}+` : l.price >= SOFT && !l.hov ? `${short(SOFT)}+, not hovered` : `${RATIO}× other shops`;
     return `<div class="shop${ph && !withPh ? " ph" : ""}"><span>${owner(l)}${ph ? `<span class="tag warn" title="Counted as a placeholder: ${why}">placeholder?</span>` : ""}` +
-      `${l.st ? `<span class="st-line"><span class="lbl">Stats</span>${esc(statText(l.st))}</span>`
-        : r.est ? `<span class="st-line missing" title="Not hovered in the recording. Range of the ${r.est.n} hovered piece${r.est.n === 1 ? "" : "s"} of this item, not this piece's own stats."><span class="lbl">Stats (est.)</span>${esc(statText(r.est.st))}` +
-          `<span class="est-n"> · range of ${r.est.n} hovered piece${r.est.n === 1 ? "" : "s"}</span></span>`
-        : r.inv === "equip" ? `<span class="st-line missing"><span class="lbl">Stats</span>not hovered in the recording</span>` : ""}</span>
+      `${statLine(r, l)}</span>
       <span class="num mesos">${fmt(l.price)}</span><span class="q">${l.qty} left</span></div>`;
   }).join("") + moreBtn(r.listings, buyKey) : `<div class="none">Not listed on the latest day.</div>`;
   const sold = r.sold.length ? `<div><h3>Sold out (${r.sold.length})</h3><div class="shops">${shopHead("Sold for", "")}${firstFew(r.sold, soldKey).map(l =>
@@ -757,7 +942,8 @@ function render() {
   const todayOnly = $("todayOnly").checked, withPh = $("withPh").checked;
   const all = withStats(withPh)
     .filter(r => !todayOnly || r.listings.length || r.sold.length)
-    .filter(r => terms.every(t => r.hay.includes(t)));
+    .filter(r => terms.every(t => r.hay.includes(t)))
+    .filter(r => tab.id !== "deals" || DEAL_INV.includes(r.inv));   // Deals: Use/Etc groups only
   $("tabs").innerHTML = TABS.map(t => `<button type="button" class="tab" role="tab" data-tab="${t.id}" aria-selected="${t === tab}">` +
     (META.mobs[t.id] ? `<img class="px" src="${META.mobs[t.id]}" alt="">` : "") + `${t.label}</button>`).join("");
   // Group -> Type -> Class; each row counts what the rows above it leave
@@ -779,6 +965,14 @@ function render() {
     (classes.length ? `<div class="frow"><span class="flabel">Class</span><div class="chips">${chip("cls", "", "All", null, !cls)}` +
       classes.map(c => chip("cls", c, c, cN[c] || 0, c === cls, c.toLowerCase())).join("") + `</div></div>` : "");
   const rows = inType.filter(r => !cls || (r.cls || []).includes(cls));
+  const q = $("q").value.trim() !== "";
+  $("qClear").hidden = !q;
+  $("search").classList.toggle("has-q", q);
+  $("clearAll").hidden = !(grp || typ || cls);
+  const isDeals = tab.id === "deals";
+  $("dealsWrap").hidden = !isDeals;
+  $("itemsWrap").hidden = isDeals;
+  if (isDeals) { $("empty").hidden = true; renderDeals(rows); return; }
   rows.sort((a, b) => {
     const va = a[sortK], vb = b[sortK];
     if (va == null && vb == null) return a.name.localeCompare(b.name);
@@ -806,10 +1000,6 @@ function render() {
       <td class="num c-chg">${chg}</td></tr>` + (isOpen ? detail(r, withPh) : "");
   }).join("");
   $("empty").hidden = rows.length > 0;
-  const q = $("q").value.trim() !== "";
-  $("qClear").hidden = !q;
-  $("search").classList.toggle("has-q", q);
-  $("clearAll").hidden = !(grp || typ || cls);
   const left = rows.length - limit;
   $("more").hidden = left <= 0;
   if (left > 0) $("more").textContent = `Show more (${fmt(left)} more)`;
@@ -899,6 +1089,16 @@ $("rows").addEventListener("click", e => {
   render();
 });
 $("rows").addEventListener("click", e => { const tr = e.target.closest("tr.item"); if (tr) toggle(tr); });
+function toggleDeal(tr) { const k = tr.dataset.key; openDeals.has(k) ? openDeals.delete(k) : openDeals.add(k); render(); }
+$("dealRows").addEventListener("click", e => {
+  const b = e.target.closest("button.shops-more");
+  if (b) { const k = b.dataset.list; fullLists.has(k) ? fullLists.delete(k) : fullLists.add(k); render(); return; }
+  const tr = e.target.closest("tr.deal"); if (tr) toggleDeal(tr);
+});
+$("dealRows").addEventListener("keydown", e => {
+  const tr = e.target.closest("tr.deal");
+  if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggleDeal(tr); }
+});
 $("rows").addEventListener("keydown", e => {
   const tr = e.target.closest("tr.item");
   if (tr && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggle(tr); }
@@ -915,7 +1115,7 @@ document.addEventListener("pointerover", e => {
   tip.hidden = !t;
   if (t) tip.textContent = t.dataset.tip;
   // item card: mouse only, on the item rows, not while the small chart tooltip is showing
-  const row = e.pointerType === "mouse" && !t ? e.target.closest("tr.item") : null;
+  const row = e.pointerType === "mouse" && !t ? e.target.closest("tr.item, tr.deal") : null;
   if (!row) { card.hidden = true; cardFor = null; return; }
   if (row.dataset.name !== cardFor) {
     cardFor = row.dataset.name;
@@ -1019,6 +1219,8 @@ def main():
                     help="also a placeholder: this many times the median of the other "
                          "prices for the same item that day")
     ap.add_argument("--fragment", action="store_true", help="omit <html>/<head>/<body>")
+    ap.add_argument("--public", action="store_true",
+                    help="build the website copy: leave out the Deals tab (local report only)")
     a = ap.parse_args()
 
     rows, n_snap = load(a.db)
@@ -1030,7 +1232,7 @@ def main():
             "types": list(dict.fromkeys([t for _, t in EQUIP_TYPES.values()] +
                                         [t for *_, t in OTHER_TYPES] + ["Other"])),
             "support": support_qr(), "feedbackUrl": site_config().get("feedback_url") or None,
-            "googleForm": site_config().get("google_form") or None}
+            "googleForm": site_config().get("google_form") or None, "deals": not a.public}
     js = lambda o: json.dumps(o, ensure_ascii=False).replace("</", "<\\/")
     page = (PAGE.replace("__ARR__", ARROWS).replace("__ICONS__", icon_links())
                 .replace("__DATA__", js(data)).replace("__META__", js(meta)))
